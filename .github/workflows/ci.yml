@@ -17,26 +17,60 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - id: linux
+          - id: linux-x86
             name: Linux (x86, shared Bullet)
             os: ubuntu-24.04
+            arch: x86
             bullet_shared_libs: "ON"
+            force_32_bit: "ON"
             expected_component: ColAndreas.so
-            release_glob: dist/ColAndreas-linux.tar.gz
-            release_archive: ColAndreas-linux.tar.gz
-          - id: linux-static
+            release_glob: dist/ColAndreas-linux-x86.tar.gz
+            release_archive: ColAndreas-linux-x86.tar.gz
+          - id: linux-x86-static
             name: Linux (x86, static Bullet)
             os: ubuntu-24.04
+            arch: x86
             bullet_shared_libs: "OFF"
+            force_32_bit: "ON"
             expected_component: ColAndreas_static.so
-            release_glob: dist/ColAndreas-linux-static.tar.gz
-            release_archive: ColAndreas-linux-static.tar.gz
-          - id: windows
+            release_glob: dist/ColAndreas-linux-x86-static.tar.gz
+            release_archive: ColAndreas-linux-x86-static.tar.gz
+          - id: linux-x64
+            name: Linux (x64, shared Bullet)
+            os: ubuntu-24.04
+            arch: x64
+            bullet_shared_libs: "ON"
+            force_32_bit: "OFF"
+            expected_component: ColAndreas.so
+            release_glob: dist/ColAndreas-linux-x64.tar.gz
+            release_archive: ColAndreas-linux-x64.tar.gz
+          - id: linux-x64-static
+            name: Linux (x64, static Bullet)
+            os: ubuntu-24.04
+            arch: x64
+            bullet_shared_libs: "OFF"
+            force_32_bit: "OFF"
+            expected_component: ColAndreas_static.so
+            release_glob: dist/ColAndreas-linux-x64-static.tar.gz
+            release_archive: ColAndreas-linux-x64-static.tar.gz
+          - id: windows-x86
             name: Windows (Win32)
             os: windows-2022
+            arch: x86
+            cmake_arch: Win32
+            vcpkg_triplet: x86-windows-static
             expected_component: ColAndreas.dll
-            release_glob: dist/ColAndreas-windows.zip
-            release_archive: ColAndreas-windows.zip
+            release_glob: dist/ColAndreas-windows-x86.zip
+            release_archive: ColAndreas-windows-x86.zip
+          - id: windows-x64
+            name: Windows (x64)
+            os: windows-2022
+            arch: x64
+            cmake_arch: x64
+            vcpkg_triplet: x64-windows-static
+            expected_component: ColAndreas.dll
+            release_glob: dist/ColAndreas-windows-x64.zip
+            release_archive: ColAndreas-windows-x64.zip
 
     steps:
       - name: Checkout
@@ -50,19 +84,29 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y cmake ninja-build g++-multilib git
 
-      - name: Build Bullet for Linux x86
+      - name: Build Bullet for Linux ${{ matrix.arch }}
         if: runner.os == 'Linux'
         shell: bash
         run: |
           set -euo pipefail
           git clone --depth 1 https://github.com/bulletphysics/bullet3 deps/bullet3
 
+          BULLET_CFLAGS=""
+          BULLET_CXXFLAGS=""
+          BULLET_LDFLAGS=""
+          if [[ "${{ matrix.arch }}" == "x86" ]]; then
+            BULLET_CFLAGS="-m32"
+            BULLET_CXXFLAGS="-m32"
+            BULLET_LDFLAGS="-m32"
+          fi
+
           cmake -S deps/bullet3 -B deps/bullet3-build -G Ninja \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_INSTALL_PREFIX="${GITHUB_WORKSPACE}/deps/bullet3-install" \
-            -DCMAKE_C_FLAGS="-m32" \
-            -DCMAKE_CXX_FLAGS="-m32" \
-            -DCMAKE_SHARED_LINKER_FLAGS="-m32" \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DCMAKE_C_FLAGS="${BULLET_CFLAGS}" \
+            -DCMAKE_CXX_FLAGS="${BULLET_CXXFLAGS}" \
+            -DCMAKE_SHARED_LINKER_FLAGS="${BULLET_LDFLAGS}" \
             -DBUILD_SHARED_LIBS="${{ matrix.bullet_shared_libs }}" \
             -DINSTALL_LIBS=ON \
             -DBUILD_BULLET2_DEMOS=OFF \
@@ -85,7 +129,11 @@ jobs:
               echo "Could not locate libBulletCollision shared library in deps/bullet3-install"
               exit 1
             fi
-            file "${bullet_collision_so}" | grep -q 'ELF 32-bit'
+            if [[ "${{ matrix.arch }}" == "x86" ]]; then
+              file "${bullet_collision_so}" | grep -q 'ELF 32-bit'
+            else
+              file "${bullet_collision_so}" | grep -q 'ELF 64-bit'
+            fi
           else
             bullet_collision_a="$(find "${GITHUB_WORKSPACE}/deps/bullet3-install" -type f -name 'libBulletCollision.a' | head -n 1)"
             if [[ -z "${bullet_collision_a}" ]]; then
@@ -94,16 +142,16 @@ jobs:
             fi
           fi
 
-      - name: Install Bullet for Windows (x86 static)
+      - name: Install Bullet for Windows (${{ matrix.arch }} static)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $VcpkgRoot = "$env:RUNNER_TEMP\vcpkg"
           git clone --depth 1 https://github.com/microsoft/vcpkg $VcpkgRoot
           & "$VcpkgRoot\bootstrap-vcpkg.bat" -disableMetrics
-          & "$VcpkgRoot\vcpkg.exe" install bullet3:x86-windows-static
+          & "$VcpkgRoot\vcpkg.exe" install bullet3:${{ matrix.vcpkg_triplet }}
 
-          $TripletRoot = "$VcpkgRoot\installed\x86-windows-static"
+          $TripletRoot = "$VcpkgRoot\installed\${{ matrix.vcpkg_triplet }}"
           if (!(Test-Path "$TripletRoot\include\bullet\btBulletDynamicsCommon.h")) { throw "Missing Bullet headers in $TripletRoot" }
           if (!(Test-Path "$TripletRoot\lib\BulletCollision.lib")) { throw "Missing Bullet import/static lib in $TripletRoot\lib" }
 
@@ -116,7 +164,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           cmake -S . -B build -G Ninja \
-            -DFORCE_32_BIT=ON \
+            -DFORCE_32_BIT=${{ matrix.force_32_bit }} \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_PREFIX_PATH="${GITHUB_WORKSPACE}/deps/bullet3-install" \
@@ -126,11 +174,11 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          cmake -S . -B build -G "Visual Studio 17 2022" -A Win32 `
+          cmake -S . -B build -G "Visual Studio 17 2022" -A ${{ matrix.cmake_arch }} `
             -DCMAKE_BUILD_TYPE=Release `
             -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded `
             -DCMAKE_TOOLCHAIN_FILE="$env:VCPKG_TOOLCHAIN_FILE" `
-            -DVCPKG_TARGET_TRIPLET=x86-windows-static `
+            -DVCPKG_TARGET_TRIPLET=${{ matrix.vcpkg_triplet }} `
             -DBULLET_ROOT="$env:VCPKG_INSTALLED_DIR" `
             -DCMAKE_PREFIX_PATH="$env:VCPKG_INSTALLED_DIR"
 
@@ -146,7 +194,7 @@ jobs:
         if: runner.os == 'Linux'
         run: bash scripts/ci/check-native-exposure.sh
 
-      - name: Locate Linux component and verify x86 binary
+      - name: Locate Linux component and verify ${{ matrix.arch }} binary
         if: runner.os == 'Linux'
         id: locate_linux_component
         shell: bash
@@ -158,14 +206,22 @@ jobs:
             echo "Could not find expected component (${expected_component}) in build output."
             exit 1
           fi
-          if ! file "${component_path}" | grep -q 'ELF 32-bit'; then
-            echo "Expected a 32-bit ELF binary, got:"
-            file "${component_path}"
-            exit 1
+          if [[ "${{ matrix.arch }}" == "x86" ]]; then
+            if ! file "${component_path}" | grep -q 'ELF 32-bit'; then
+              echo "Expected a 32-bit ELF binary, got:"
+              file "${component_path}"
+              exit 1
+            fi
+          else
+            if ! file "${component_path}" | grep -q 'ELF 64-bit'; then
+              echo "Expected a 64-bit ELF binary, got:"
+              file "${component_path}"
+              exit 1
+            fi
           fi
           echo "component_path=${component_path}" >> "${GITHUB_OUTPUT}"
 
-      - name: Locate Windows component and verify x86 binary
+      - name: Locate Windows component and verify ${{ matrix.arch }} binary
         if: runner.os == 'Windows'
         id: locate_windows_component
         shell: pwsh
@@ -181,8 +237,13 @@ jobs:
 
           $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
           $magic = [BitConverter]::ToUInt16($bytes, $peOffset + 24)
-          if ($machine -ne 0x14C) { throw ("Expected x86 machine type 0x14C, got 0x{0:X}" -f $machine) }
-          if ($magic -ne 0x10B) { throw ("Expected PE32 optional header 0x10B, got 0x{0:X}" -f $magic) }
+          if ("${{ matrix.arch }}" -eq "x86") {
+            if ($machine -ne 0x14C) { throw ("Expected x86 machine type 0x14C, got 0x{0:X}" -f $machine) }
+            if ($magic -ne 0x10B) { throw ("Expected PE32 optional header 0x10B, got 0x{0:X}" -f $magic) }
+          } else {
+            if ($machine -ne 0x8664) { throw ("Expected x64 machine type 0x8664, got 0x{0:X}" -f $machine) }
+            if ($magic -ne 0x20B) { throw ("Expected PE32+ optional header 0x20B, got 0x{0:X}" -f $magic) }
+          }
 
           $componentPath = $component.FullName -replace '\\','/'
           "component_path=$componentPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -226,10 +287,10 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force -Path dist/windows/components | Out-Null
-          New-Item -ItemType Directory -Force -Path dist/windows/pawno/include | Out-Null
-          Copy-Item "${{ steps.locate_windows_component.outputs.component_path }}" "dist/windows/components/ColAndreas.dll"
-          Copy-Item "Server/include/colandreas.inc" "dist/windows/pawno/include/colandreas.inc"
+          New-Item -ItemType Directory -Force -Path "dist/${{ matrix.id }}/components" | Out-Null
+          New-Item -ItemType Directory -Force -Path "dist/${{ matrix.id }}/pawno/include" | Out-Null
+          Copy-Item "${{ steps.locate_windows_component.outputs.component_path }}" "dist/${{ matrix.id }}/components/ColAndreas.dll"
+          Copy-Item "Server/include/colandreas.inc" "dist/${{ matrix.id }}/pawno/include/colandreas.inc"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
@@ -270,14 +331,14 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path release | Out-Null
           Remove-Item -Recurse -Force "release/ColAndreas" -ErrorAction SilentlyContinue
-          Copy-Item -Recurse "dist/windows" "release/ColAndreas"
-          Compress-Archive -Path "release/ColAndreas" -DestinationPath "dist/ColAndreas-windows.zip" -Force
+          Copy-Item -Recurse "dist/${{ matrix.id }}" "release/ColAndreas"
+          Compress-Archive -Path "release/ColAndreas" -DestinationPath "dist/${{ matrix.release_archive }}" -Force
 
       - name: Verify Windows package contents
         if: github.event_name == 'release' && runner.os == 'Windows'
         shell: pwsh
         run: |
-          $pkg = "dist/ColAndreas-windows.zip"
+          $pkg = "dist/${{ matrix.release_archive }}"
           if (!(Test-Path $pkg)) { throw "No ZIP package found: $pkg" }
           Add-Type -AssemblyName System.IO.Compression.FileSystem
           $zip = [System.IO.Compression.ZipFile]::OpenRead($pkg)

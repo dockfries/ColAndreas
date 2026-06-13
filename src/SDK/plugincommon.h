@@ -35,7 +35,11 @@
   #ifndef _MSC_VER
     #pragma message "Warning: Not using a VC++ compiler."
   #endif
-  #define PLUGIN_CALL __stdcall
+  #ifdef _WIN64
+    #define PLUGIN_CALL
+  #else
+    #define PLUGIN_CALL __stdcall
+  #endif
   #define PLUGIN_EXPORT PLUGIN_EXTERN_C
 #else
   #error "You must define one of WIN32, LINUX or FREEBSD"

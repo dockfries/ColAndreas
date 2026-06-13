@@ -1,5 +1,7 @@
 # Build files
 build/
+build32/
+build64/
 output/
 
 # Windows image file caches

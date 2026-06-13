@@ -15,7 +15,8 @@
 #endif
 
 #ifndef WIN32
-typedef unsigned long DWORD;
+#include <stdint.h>
+typedef uint32_t DWORD;
 #define MAX_PATH 250
 #endif
 

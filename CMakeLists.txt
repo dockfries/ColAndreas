@@ -2,11 +2,18 @@ cmake_minimum_required(VERSION 3.19)
 
 project(ColAndreas LANGUAGES C CXX)
 
-option(FORCE_32_BIT "Force 32-bit compilation on UNIX." ON)
+option(FORCE_32_BIT "Force 32-bit compilation on UNIX." OFF)
 option(BuildWizard "Compile the Wizard application." OFF)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+
+# Detect 64-bit architecture
+if(CMAKE_SIZEOF_VOID_P EQUAL 8)
+	set(IS_64_BIT TRUE)
+else()
+	set(IS_64_BIT FALSE)
+endif()
 
 if(UNIX AND FORCE_32_BIT)
 	set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -m32")
@@ -33,14 +40,22 @@ endif()
 
 if(WIN32)
 	add_definitions(-DWIN32 -D_WIN32)
-
-	if(MSVC)
-		# Keep runtime linkage consistent with x86-windows-static dependencies (vcpkg/Bullet).
-		set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+	if(IS_64_BIT)
+		add_definitions(-D_WIN64)
 	endif()
 
-	set(CMAKE_C_FLAGS "/nologo /EHsc /MT")
-	set(CMAKE_CXX_FLAGS "/nologo /EHsc /MT")
+	if(MSVC)
+		# Keep runtime linkage consistent with vcpkg/Bullet.
+		# (CI may override via -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded)
+		if(NOT DEFINED CMAKE_MSVC_RUNTIME_LIBRARY)
+			set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+		endif()
+		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /nologo /EHsc")
+		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /nologo /EHsc")
+	else()
+		set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /nologo /EHsc /MT")
+		set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /nologo /EHsc /MT")
+	endif()
 
 	set(CMAKE_C_FLAGS_DEBUG "/Od /Zi")
 	set(CMAKE_CXX_FLAGS_DEBUG "/Od /Zi")
